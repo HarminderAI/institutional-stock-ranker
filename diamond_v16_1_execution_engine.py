@@ -1,11 +1,11 @@
 # ==========================================================
-# 🏛️ DIAMOND v16.1 — EXECUTION ENGINE (FINAL POLISH)
-# 🏆 STATUS: TRACEABLE | IDEMPOTENT | PRIORITIZED | ROBUST
+# 🏛️ DIAMOND v16.3 — EXECUTION ENGINE (PRODUCTION)
+# 🏆 STATUS: STEALTH | HEALTH-PROBED | ROBUST
 # ==========================================================
 
 import os, json, datetime, sys, time, random
 import pytz, requests
-import pandas as pd
+import pandas as pd  # <--- [FIX 1] Critical Import Added
 import pandas_ta as ta
 import yfinance as yf
 import gspread
@@ -21,6 +21,7 @@ SIGNAL_FILE = "diamond_signal.json"
 
 # [DOCS] Execution sanity only; Deep analysis guaranteed upstream (v17).
 MIN_BARS_REQUIRED = 50 
+HEALTH_PROBE_SYM  = "SBIN" # Liquid stock to test connection
 
 # Secrets
 TELEGRAM_TOKEN  = os.getenv("TELEGRAM_TOKEN")
@@ -28,9 +29,11 @@ CHAT_ID         = os.getenv("CHAT_ID")
 GOOGLE_SHEET_ID = os.getenv("GOOGLE_SHEET_ID")
 GOOGLE_JSON_RAW = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
 
+# [STEALTH] Clean Desktop Agents Only (No Mobile/Bot-like strings)
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15"
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0"
 ]
 
 # ==========================================================
@@ -51,11 +54,29 @@ def send_msg(text):
         requests.post(url, data={"chat_id": CHAT_ID, "text": text[:4000], "parse_mode": "HTML"}, timeout=10)
     except: pass
 
+def check_market_health():
+    """
+    [DEFENSE] The Health Probe.
+    Checks connection to Yahoo Finance before launching the full run.
+    If this fails, WE DO NOT RUN. Silence is safer than persistence.
+    """
+    print(f"🩺 Probing Market Health ({HEALTH_PROBE_SYM}.NS)...")
+    try:
+        # Single thread, minimal data request
+        df = yf.download(f"{HEALTH_PROBE_SYM}.NS", period="5d", progress=False, threads=False)
+        if df.empty or len(df) < 2:
+            raise Exception("Empty Data Received")
+        print("✅ Connection Healthy. Proceeding.")
+        return True
+    except Exception as e:
+        print(f"💀 HEALTH CHECK FAILED: {e}")
+        print("🛑 SYSTEM ABORT: Staying silent to avoid ban escalation.")
+        return False
+
 def check_sheets_idempotency(rows_to_add, worksheet):
     """
     Prevents duplicates within the same Run ID.
     Key: Date | Symbol | RunID
-    Allows multiple runs per day, but blocks retry duplicates.
     """
     try:
         existing_data = worksheet.get_all_values()
@@ -63,19 +84,18 @@ def check_sheets_idempotency(rows_to_add, worksheet):
         
         # Skip header row
         for row in existing_data[1:]:
-            if len(row) >= 10: # Ensure row has RunID column
-                # Key: "YYYY-MM-DD|SYMBOL|RUN_ID"
+            if len(row) >= 3: # [FIX 4] Robust length check
+                # Key: "YYYY-MM-DD|SYMBOL|RUN_ID" (RunID is always last)
                 key = f"{row[0]}|{row[1]}|{row[-1]}"
                 existing_set.add(key)
         
         unique_rows = []
         for row in rows_to_add:
-            # Key: "YYYY-MM-DD|SYMBOL|RUN_ID"
             key = f"{row[0]}|{row[1]}|{row[-1]}"
             if key not in existing_set:
                 unique_rows.append(row)
             else:
-                print(f"🔄 Skipping Duplicate (Replay Safety): {row[1]} | {row[-1]}")
+                print(f"🔄 Skipping Duplicate: {row[1]}")
                 
         return unique_rows
     except Exception as e:
@@ -145,27 +165,39 @@ def refine_trade(df):
 # ==========================================================
 def main():
     run_id = generate_run_id()
-    print(f"💎 Diamond v16.1 (Run ID: {run_id}) Initiating...")
+    print(f"💎 Diamond v16.3 (Run ID: {run_id}) Initiating...")
 
-    # 1. Load Contract
+    # 1. [DEFENSE] Health Probe
+    # If this fails, we return immediately. No retries.
+    if not check_market_health():
+        return
+
+    # 2. Load Contract
     meta, universe = load_signal()
     if not meta or not universe: return
 
     kill_switch = meta.get("kill_switch", False)
     protocol = meta.get("protocol", "NORMAL")
     
-    # 2. Throttling Logic
+    # 3. Throttling Logic
     max_display = 2 if kill_switch else 5
     
     print(f"📥 Loaded: {len(universe)} candidates | Protocol: {protocol}")
     if kill_switch: print("⚠️ KILL SWITCH ACTIVE: High Quality Throttling Enabled.")
 
-    # 3. Fetch Live Prices
+    # 4. Fetch Live Prices (Safe Mode)
     symbols = [u["symbol"] for u in universe]
-    print("⏳ Fetching Live Prices...")
+    print("⏳ Fetching Live Prices (Stealth Mode)...")
     
     tickers = [f"{s}.NS" for s in symbols]
-    hist = yf.download(tickers, period="1y", group_by="ticker", threads=True, progress=False)
+    
+    # [DEFENSE] Concurrency Cap
+    # threads=2 (instead of True/Max) drastically reduces ban risk.
+    try:
+        hist = yf.download(tickers, period="1y", group_by="ticker", threads=2, progress=False)
+    except Exception as e:
+        print(f"❌ Bulk Download Failed: {e}")
+        return
     
     executable_setups = []
     sheet_rows = []
@@ -176,7 +208,10 @@ def main():
         try:
             # Safe Data Extraction
             if isinstance(hist.columns, pd.MultiIndex):
-                if f"{sym}.NS" not in hist.columns.levels[0]: continue
+                # [FIX 3] Log missing symbols
+                if f"{sym}.NS" not in hist.columns.levels[0]: 
+                    print(f"⚠️ Missing Data: {sym}.NS (Dropped by Yahoo)")
+                    continue
                 df = hist[f"{sym}.NS"].copy()
             else:
                 if len(symbols) == 1: df = hist.copy()
@@ -205,7 +240,7 @@ def main():
                 ist_now().strftime("%Y-%m-%d"), 
                 sym, u["score"], live_price, sl, tgt, 
                 u.get("sector", "Unknown"), u.get("del_pct", 0), 
-                protocol, run_id # <--- Strong Idempotency Key
+                protocol, run_id 
             ])
 
         except Exception: continue
@@ -221,7 +256,7 @@ def main():
     executable_setups.sort(key=lambda x: x["score"], reverse=True)
     
     msg = [
-        f"💎 <b>Diamond v16.1 Execution</b>",
+        f"💎 <b>Diamond v16.3 Execution</b>",
         f"🆔 Run: <code>{run_id}</code>",
         f"📅 {ist_now().strftime('%d-%b %H:%M')} | 🚦 {kill_switch}",
         f"⚖️ Protocol: <b>{protocol}</b>",
@@ -233,8 +268,8 @@ def main():
         icon = "🚀" if r["score"] > 85 else "✅"
         msg.append(
             f"{icon} <b>{r['symbol']}</b> ({r['score']})\n"
-            f"   💰 ₹{r['price']} | 🏗️ {r['sector']}\n"
-            f"   🎯 {r['tgt']} | 🛑 {r['sl']}"
+            f"   💰 {round(r['price'], 2)} | 🏗️ {r['sector']}\n"
+            f"   🎯 {round(r['tgt'], 2)} | 🛑 {round(r['sl'], 2)}"
         )
     
     if len(executable_setups) > max_display:
