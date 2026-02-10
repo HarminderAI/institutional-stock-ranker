@@ -7,7 +7,7 @@ from keep_alive import keep_alive
 # 🔗 IMPORT ENGINES (CURRENT NAMING)
 # ==========================================================
 import diamond_v17_2_main           # v17.1 — Strategy / Brain
-import diamond_v16_1_execution_engine   # v16.1 — Execution / Hands
+import diamond_v16_3_execution_engine   # v16.1 — Execution / Hands
 
 # ==========================================================
 # ⚙️ CONFIGURATION
@@ -65,7 +65,7 @@ def main():
         if 9 <= now.hour < 16 and now.weekday() < 5:
             print("⚡ Checking Live Prices (v16.1)...")
             try:
-                diamond_v16_1_execution_engine.main()
+                diamond_v16_3_execution_engine.main()
             except Exception as e:
                 print(f"❌ Execution Engine Error: {e}")
         else:
