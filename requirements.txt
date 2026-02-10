@@ -1,3 +1,4 @@
+flask
 pandas
 pandas_ta
 yfinance
