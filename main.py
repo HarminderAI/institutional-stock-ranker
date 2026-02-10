@@ -4,8 +4,8 @@ import pytz
 from keep_alive import keep_alive
 
 # Import your two bots
-import diamond_strategy   # v17.1 (The Brain)
-import diamond_execution  # v16.1 (The Hands)
+import diamond_v17_main   # v17.1 (The Brain)
+import diamond_v16_1_execution_engine  # v16.1 (The Hands)
 
 # ==========================================
 # ⚙️ CONFIGURATION
@@ -46,7 +46,7 @@ def main():
         if is_time_match and is_new_day:
             print("🧠 Starting Daily Strategy Scan (v17)...")
             try:
-                diamond_strategy.main()
+                diamond_v17_main.main()
                 last_strategy_run = now.date()
                 print("✅ Strategy Complete. Signal Updated.")
             except Exception as e:
@@ -58,7 +58,7 @@ def main():
         if 9 <= now.hour < 16 and now.weekday() < 5:
             print("⚡ Checking Live Prices (v16)...")
             try:
-                diamond_execution.main()
+                diamond_v16_1_execution_engine.main()
             except Exception as e:
                 print(f"❌ Execution Failed: {e}")
         else:
