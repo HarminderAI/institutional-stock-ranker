@@ -6,7 +6,7 @@ from keep_alive import keep_alive
 # ==========================================================
 # 🔗 IMPORT ENGINES (CURRENT NAMING)
 # ==========================================================
-import diamond_v17_main                 # v17.1 — Strategy / Brain
+import diamond_v17_2_main           # v17.1 — Strategy / Brain
 import diamond_v16_1_execution_engine   # v16.1 — Execution / Hands
 
 # ==========================================================
@@ -52,7 +52,7 @@ def main():
 
             if is_past_strategy_time and is_new_day:
                 print("🧠 Starting Daily Strategy Scan (v17.1)...")
-                diamond_v17_main.main()
+                diamond_v17_2_main.main()
                 last_strategy_run = now.date()
                 print("✅ Strategy Complete. Signal File Updated.")
         except Exception as e:
