@@ -1,0 +1,8 @@
+pandas
+pandas_ta
+yfinance
+requests
+gspread
+google-auth
+pytz
+urllib3
